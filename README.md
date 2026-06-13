@@ -173,7 +173,7 @@ The reference engine proves the **architecture**. The Rust core (`rust/`) is the
    (time-travel)  (graph, AS OF)    eq/ordered/search  CDC+dedup+tiers, Merkle roots
 ```
 
-One Rust core (`nedb-core`) → **PyO3** wheels (PyPI) and **napi-rs** binaries (npm), plus a future `nedbd` server (RESP-compatible) and a WASM build for browser/edge.
+PyPI ships a **universal pure-Python wheel** (`pip install nedb-engine` works on every platform/Python, and includes the `nedbd` server) — the engine, persistence, and daemon are all pure Python. npm ships **napi-rs** native addons. Native PyO3 acceleration for PyPI is additive/roadmap (the public API is identical with or without it). A RESP-compatible `nedbd` wire protocol and a WASM build are also on the roadmap.
 
 Full design: [`docs/SPEC.md`](docs/SPEC.md).
 
@@ -197,7 +197,8 @@ docs/SPEC.md     architecture specification
 - [x] Durable persistence: append-only log (AOF) on disk + replay-on-open; `verify()` / `AS OF` survive restarts
 - [ ] RDB-style snapshot checkpoint (fast load) that keeps the AOF chain intact
 - [ ] Rust core parity (persistence in `nedb._native`) + criterion benches + `cargo test`
-- [ ] PyO3 wheels + napi-rs binaries published on tag
+- [x] Universal pure-Python wheel + sdist on PyPI (installs everywhere; ships the `nedbd` command); napi-rs binaries on npm
+- [ ] Additive native PyO3 acceleration wheels for PyPI (optional speed; same API)
 - [x] `nedbd` server: HTTP/JSON daemon — durable, multi-database; `pip install` ships the `nedbd` command
 - [ ] `nedbd`: RESP-compatible wire protocol + native protocol
 - [ ] Similarity-picked deltas + schema-aware columnar transforms

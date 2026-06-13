@@ -1,11 +1,11 @@
 name: release
 
-# Builds NEDB from the single Rust source into cross-platform artifacts and
-# publishes to BOTH registries on a version tag:
-#   * PyPI  — maturin mixed wheels (native nedb._native + pure-Python nedb) + sdist
-#   * npm   — napi-rs prebuilt native addons, package "nedb-engine"
-# Publish jobs run only after every build leg is green, so a failed build never
-# yields a partial release. Secrets required: PYPI_API_TOKEN, NPM_TOKEN
+# Publishes NEDB on a version tag:
+#   * PyPI — a universal pure-Python wheel (py3-none-any) + sdist, so `pip install
+#            nedb-engine` works on EVERY platform/Python with no toolchain, and the
+#            `nedbd` console script is always available.
+#   * npm  — napi-rs prebuilt native node addon, package "nedb-engine".
+# Secrets required: PYPI_API_TOKEN, NPM_TOKEN.
 
 on:
   push:
@@ -17,66 +17,23 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------- PyPI -----
-  wheels:
-    name: wheels (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  pypi:
+    name: Publish to PyPI (universal)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Build wheels (maturin mixed layout)
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --out dist
-          manylinux: auto
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}
-          path: dist
-
-  sdist:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
-          path: dist
-
-  publish-pypi:
-    needs: [wheels, sdist]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdist
-          path: dist
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install twine
+      - run: python3 tests/test_nedb.py        # 11/11 invariants gate the release
+      - run: pip install --upgrade build twine
+      - run: python -m build                   # -> py3-none-any wheel + sdist
       - name: Publish to PyPI
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload --skip-existing --verbose dist/*.whl
+        run: twine upload --skip-existing --verbose dist/*
 
   # ----------------------------------------------------------------- npm -----
   node-binaries:
@@ -124,8 +81,6 @@ jobs:
           pattern: node-*
           merge-multiple: true
           path: .
-      - name: List downloaded artifacts
-        run: ls -la *.node index.js index.d.ts
       - name: Publish to npm (all platform binaries bundled in one package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

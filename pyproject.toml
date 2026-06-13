@@ -1,26 +1,28 @@
-# nedb-engine — maturin mixed layout: ships a native Rust core (nedb._native)
-# alongside the pure-Python package (python/nedb). Native wheels are built per
-# platform by CI; the pure-Python code is the always-works fallback.
+# nedb-engine — pure-Python distribution. The engine, durable AOF persistence,
+# and the nedbd server are all pure Python, so we ship a universal py3-none-any
+# wheel + sdist that installs on every platform/Python with no toolchain. The
+# Rust core (rust/) remains for the napi (npm) addon and future native PyPI
+# acceleration, reintroduced additively; `nedb._native` already imports lazily
+# and the package works identically without it.
 [build-system]
-requires = ["maturin>=1.5,<2"]
-build-backend = "maturin"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "nedb-engine"
-version = "0.3.0"
-description = "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable). Native Rust core with a pure-Python fallback."
+version = "0.3.1"
+description = "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable) with durable AOF persistence and a server daemon (nedbd)."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Eth-Interchained" }]
 keywords = ["database", "embedded", "mvcc", "time-travel", "versioning",
-            "compression", "dedup", "graph", "search", "redis", "git", "rust"]
+            "compression", "dedup", "graph", "search", "redis", "git", "persistence", "server"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Rust",
     "Topic :: Database :: Database Engines/Servers",
 ]
 
@@ -31,8 +33,8 @@ nedbd = "nedb.server:main"
 Homepage = "https://github.com/Eth-Interchained/nedb"
 Repository = "https://github.com/Eth-Interchained/nedb"
 
-[tool.maturin]
-python-source = "python"
-module-name = "nedb._native"
-manifest-path = "rust/crates/nedb-py/Cargo.toml"
-# pure-Python sdist fallback still builds; native wheels carry the compiled core.
+[tool.hatch.build.targets.wheel]
+packages = ["python/nedb"]
+
+[tool.hatch.build.targets.sdist]
+include = ["python/nedb", "README.md", "LICENSE"]
