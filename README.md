@@ -7,6 +7,8 @@
 Replay-protected · idempotent · relational · filterable · sortable · searchable · provable.
 One Rust core → ships to **PyPI** and **npm** from a single source.
 
+**[Website & docs → eth-interchained.github.io/nedb](https://eth-interchained.github.io/nedb/)**
+
 </div>
 
 ---
@@ -210,4 +212,4 @@ The agentic, prompt-to-database GUI for NEDB — natural language → schema, NQ
 
 ## License
 
-Apache-2.0. Part of the [Interchained](https://github.com/interchained) ecosystem.
+Apache-2.0 · © INTERCHAINED, LLC — [interchained.org](https://interchained.org). Built with [AiAssist](https://aiassist.net).
