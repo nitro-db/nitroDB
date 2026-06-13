@@ -1,6 +1,6 @@
 {
   "name": "nedb-engine",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable). Native core via napi-rs.",
   "main": "index.js",
   "types": "index.d.ts",
