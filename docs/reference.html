@@ -237,6 +237,13 @@ pre{
       <a href="#autoindex">Auto-Indexing</a>
     </div>
     <div class="sb-group">
+      <div class="sb-group-label">v0.5.x features</div>
+      <a href="#snapshots">Snapshot Checkpoints</a>
+      <a href="#ttl">TTL / Expiry</a>
+      <a href="#groupby">GROUP BY Aggregations</a>
+      <a href="#encryption">Encryption at Rest</a>
+    </div>
+    <div class="sb-group">
       <div class="sb-group-label">Release</div>
       <a href="#changelog">Changelog</a>
     </div>
@@ -1081,10 +1088,203 @@ db.verify()</pre>
 
 <div class="divider"></div>
 
+<!-- ═══════════════════ SNAPSHOTS ═══════════════════ -->
+<section class="section" id="snapshots">
+  <div class="section-tag">v0.5.x</div>
+  <h2>Snapshot Checkpoints</h2>
+  <p class="section-lead">Capture the full database state to disk — anchored in the hash chain — so future starts are O(delta) instead of O(total). The chain never breaks: the checkpoint is a real op in the AOF.</p>
+
+  <div class="code-wrap">
+    <div class="code-label">Python</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="ck">from</span> nedb <span class="ck">import</span> NEDB
+
+db = NEDB(<span class="cs">"./data"</span>)
+<span class="cc"># ... write 100 K rows ...</span>
+db.checkpoint()   <span class="cc"># anchor state in the chain → writes snapshot.json</span>
+db.close()
+
+<span class="cc"># Next open: loads snapshot then replays only delta ops</span>
+db2 = NEDB(<span class="cs">"./data"</span>)
+<span class="ck">assert</span> db2.verify()   <span class="cc"># chain from genesis → checkpoint op → delta: intact</span></pre>
+  </div>
+
+  <div class="note">
+    <p><strong>nedbd auto-checkpoints on SIGTERM / SIGINT.</strong> Stopping the daemon with <code>Ctrl+C</code> or <code>kill</code> writes a checkpoint for every open database before shutdown. The next start loads from those snapshots — restart time is proportional to writes <em>since the last checkpoint</em>, not total history.</p>
+  </div>
+
+  <p>You can also trigger a checkpoint over HTTP at any time:</p>
+  <div class="code-wrap">
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre>curl -X POST localhost:7070/v1/databases/mydb/checkpoint
+<span class="cc"># {"ok": true, "head": "abc...", "seq": 1042}</span></pre>
+  </div>
+
+  <h3>What the snapshot contains</h3>
+  <ul>
+    <li>MVCC store (every key's HEAD value and write seq)</li>
+    <li>Relations (graph edges with added/removed seqs)</li>
+    <li>Index configuration (eq / ordered / search specs)</li>
+    <li>BlobStore chunks and file manifests (both tiers, compressed)</li>
+    <li>Nonce and idempotency tables (replay protection survives restart)</li>
+  </ul>
+  <div class="warn">
+    <p><strong>Pre-checkpoint time-travel:</strong> <code>AS OF</code> queries for seqs <em>before</em> the snapshot require the full AOF. Keep the log file for archival use if you need indefinite time-travel; otherwise snapshots are self-contained for all operations after the checkpoint seq.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════ TTL ═══════════════════ -->
+<section class="section" id="ttl">
+  <div class="section-tag">v0.5.x</div>
+  <h2>TTL / Key Expiry</h2>
+  <p class="section-lead">Set a time-to-live on any document. Expiry is lazy (checked on every read) and append-only (a delete op is written to the log when a key expires).</p>
+
+  <div class="code-wrap">
+    <div class="code-label">Python</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="cc"># Put with TTL</span>
+db.put(<span class="cs">"cache"</span>, <span class="cs">"session"</span>, {<span class="cs">"token"</span>: <span class="cs">"xyz"</span>}, ttl_s=<span class="cn">3600</span>)   <span class="cc"># expires in 1 hour</span>
+
+<span class="cc"># Set / update TTL on an existing doc</span>
+db.expire(<span class="cs">"cache"</span>, <span class="cs">"session"</span>, ttl_s=<span class="cn">300</span>)   <span class="cc"># update to 5 minutes; False if not found</span>
+
+<span class="cc"># Bulk sweep (call periodically for background maintenance)</span>
+n = db.sweep()   <span class="cc"># → number of expired docs deleted</span></pre>
+  </div>
+
+  <table class="ptbl">
+    <tr><th>Method</th><th>Description</th></tr>
+    <tr><td><code>put(..., ttl_s=N)</code></td><td>Store <code>_expires_at = now + N</code> in the doc. Lazy expiry on every subsequent <code>get()</code>.</td></tr>
+    <tr><td><code>expire(coll, id, ttl_s)</code></td><td>Set or update TTL on an existing document. Returns <code>False</code> if the document doesn't exist.</td></tr>
+    <tr><td><code>sweep()</code></td><td>Scan and delete all expired documents now. Returns the count deleted.</td></tr>
+  </table>
+
+  <div class="note">
+    <p><strong>Time-travel ignores expiry.</strong> <code>get(..., as_of=seq)</code> always returns what was true at that seq, even if the document has since expired. Expiry only fires on HEAD reads.</p>
+  </div>
+  <p>The Redis adapter's <code>EXPIRE</code>, <code>TTL</code>, and <code>PTTL</code> commands now map to <code>db.expire()</code>.</p>
+</section>
+
+<!-- ═══════════════════ GROUP BY ═══════════════════ -->
+<section class="section" id="groupby">
+  <div class="section-tag">v0.5.x</div>
+  <h2>GROUP BY Aggregations</h2>
+  <p class="section-lead">Aggregate query results by a field. Compatible with <code>WHERE</code>, <code>SEARCH</code>, and <code>LIMIT</code> — filtering happens before grouping.</p>
+
+  <div class="code-wrap">
+    <div class="code-label">NQL examples</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="cc"># Count rows per group</span>
+db.query(<span class="cs">"FROM orders GROUP BY status COUNT"</span>)
+<span class="cc"># → [{"status": "paid", "count": 42}, {"status": "pending", "count": 7}]</span>
+
+<span class="cc"># Sum a numeric field</span>
+db.query(<span class="cs">"FROM sales GROUP BY region SUM revenue"</span>)
+<span class="cc"># → [{"region": "north", "count": 3, "sum_revenue": 15000}, ...]</span>
+
+<span class="cc"># Average</span>
+db.query(<span class="cs">"FROM scores GROUP BY grade AVG score"</span>)
+
+<span class="cc"># Min / Max</span>
+db.query(<span class="cs">"FROM items GROUP BY category MIN price"</span>)
+db.query(<span class="cs">"FROM items GROUP BY category MAX price"</span>)
+
+<span class="cc"># With WHERE (filter before grouping)</span>
+db.query(<span class="cs">'FROM orders WHERE region = "EU" GROUP BY status COUNT'</span>)</pre>
+  </div>
+
+  <h3>Aggregate functions</h3>
+  <table class="ptbl">
+    <tr><th>Syntax</th><th>Output field</th><th>Description</th></tr>
+    <tr><td><code>GROUP BY f COUNT</code></td><td><code>count</code></td><td>Number of rows in the group</td></tr>
+    <tr><td><code>GROUP BY f SUM field</code></td><td><code>sum_field</code></td><td>Sum of <code>field</code> across the group</td></tr>
+    <tr><td><code>GROUP BY f AVG field</code></td><td><code>avg_field</code></td><td>Average of <code>field</code></td></tr>
+    <tr><td><code>GROUP BY f MIN field</code></td><td><code>min_field</code></td><td>Minimum value of <code>field</code></td></tr>
+    <tr><td><code>GROUP BY f MAX field</code></td><td><code>max_field</code></td><td>Maximum value of <code>field</code></td></tr>
+  </table>
+  <p>Every group result always includes <code>count</code> alongside the requested aggregate. Non-numeric values are skipped for SUM / AVG / MIN / MAX.</p>
+</section>
+
+<!-- ═══════════════════ ENCRYPTION ═══════════════════ -->
+<section class="section" id="encryption">
+  <div class="section-tag">v0.5.3</div>
+  <h2>Encryption at Rest</h2>
+  <p class="section-lead">AES-256-GCM at-rest encryption with a double-envelope key structure. Toggle-able — zero overhead when disabled. Encrypts the AOF, snapshot.json, and BlobStore chunks.</p>
+
+  <h3>The double envelope</h3>
+  <div class="arch">
+External TMK (Table Master Key)   ← provided by operator (env / arg / key file)
+          ↓  AES-256-GCM wrap
+        DEK  (Data Encryption Key) ← random per database → stored in key.enc
+          ↓  AES-256-GCM encrypt
+        Data  (AOF lines, snapshot.json, blob chunks)
+  </div>
+
+  <h3>Enable encryption</h3>
+  <div class="code-wrap">
+    <div class="code-label">Python — programmatic TMK</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre>db = NEDB(<span class="cs">"./data"</span>, tmk=bytes.fromhex(<span class="cs">"a3f1..."</span>))   <span class="cc"># 32-byte hex key</span></pre>
+  </div>
+  <div class="code-wrap">
+    <div class="code-label">Environment variable (recommended for production)</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="cc"># .env</span>
+NEDB_TMK=a3f1...  <span class="cc"># 64-char hex string (any length accepted, normalised via HKDF)</span>
+
+<span class="cc"># or a key file</span>
+NEDB_TMK_FILE=/run/secrets/nedb-tmk</pre>
+  </div>
+  <div class="code-wrap">
+    <div class="code-label">nedbd — encrypts all databases it manages</div>
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre>NEDB_TMK=a3f1... nedbd</pre>
+  </div>
+
+  <h3>Key rotation</h3>
+  <p>Re-wrap the DEK under a new TMK without re-encrypting any data. The old TMK is immediately rejected after rotation.</p>
+  <div class="code-wrap">
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre>db = NEDB(<span class="cs">"./data"</span>, tmk=old_key)
+db.rewrap_key(old_tmk=old_key, new_tmk=new_key)
+db.close()
+<span class="cc"># Database now only opens with new_key</span></pre>
+  </div>
+
+  <h3>What is encrypted</h3>
+  <table class="ptbl">
+    <tr><th>File</th><th>Coverage</th></tr>
+    <tr><td><code>log.aof</code></td><td>Every op line encrypted individually — <code>{"enc":1,"ct":"&lt;b64&gt;"}</code></td></tr>
+    <tr><td><code>snapshot.json</code></td><td>Entire file encrypted as a single envelope</td></tr>
+    <tr><td><code>key.enc</code></td><td>Wrapped DEK (never the plaintext DEK)</td></tr>
+    <tr><td>BlobStore chunks</td><td>Each chunk encrypted before base64 storage in the snapshot</td></tr>
+  </table>
+
+  <div class="note">
+    <p><strong>The hash chain is unaffected.</strong> <code>verify()</code>, <code>AS OF</code>, and Merkle proofs operate on decrypted log entries — encryption is a transparent layer below the log. The chain from genesis through every checkpoint op to the current head remains continuously verifiable.</p>
+  </div>
+
+  <div class="warn">
+    <p><strong>Requires:</strong> <code>pip install cryptography</code>. If the package is missing, a clear <code>ImportError</code> is raised when encryption is attempted. Unencrypted databases are unaffected.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
 <!-- ═══════════════════ CHANGELOG ═══════════════════ -->
 <section class="section" id="changelog">
   <div class="section-tag">Release History</div>
   <h2>Changelog</h2>
+
+  <div class="cl-item"><span class="cl-ver">0.5.3</span><div class="cl-body"><h4>AES-256-GCM encryption at rest — double envelope TMK</h4><p>Toggle-able at-rest encryption for the AOF, snapshots, and BlobStore chunks. Double-envelope: a random per-database DEK is wrapped by an external TMK (programmatic, <code>NEDB_TMK</code> env, or key file). The GCM tag detects any tampering on read. Key rotation via <code>db.rewrap_key()</code> re-wraps the DEK without touching data. The hash chain, <code>verify()</code>, and <code>AS OF</code> work unchanged through encryption. Requires <code>pip install cryptography</code>. 38 new tests; 127/127 total.</p></div></div>
+
+  <div class="cl-item"><span class="cl-ver">0.5.2</span><div class="cl-body"><h4>BlobStore (Cascade files) persisted in checkpoints</h4><p>Files stored via <code>put_file()</code> are now fully preserved across <code>checkpoint()</code> + restart. The snapshot serialises both BlobStore tiers: compressed chunk bytes (encrypted if DEK set), file manifests, Merkle roots, and dedup stats. <code>get_file()</code>, <code>file_root()</code>, <code>file_proof()</code>, and <code>compression_stats()</code> all work identically after a snapshot-assisted restart.</p></div></div>
+
+  <div class="cl-item"><span class="cl-ver">0.5.1</span><div class="cl-body"><h4>nedbd auto-checkpoint on SIGTERM / SIGINT</h4><p>The daemon checkpoints every open database before shutdown (SIGTERM or SIGINT) so the next startup loads from the snapshot with zero delta ops to replay. Signal handler uses a daemon thread to call <code>httpd.shutdown()</code> — avoids deadlock with <code>serve_forever()</code>. Also adds <code>POST /v1/databases/:name/checkpoint</code> for on-demand checkpoints.</p></div></div>
+
+  <div class="cl-item"><span class="cl-ver">0.5.0</span><div class="cl-body"><h4>Snapshot checkpoints, TTL/expiry, GROUP BY aggregations</h4><p><strong>Snapshots:</strong> <code>db.checkpoint()</code> captures state in a <code>snapshot.json</code> anchored in the hash chain (the checkpoint is a real log op). Future opens are O(delta). <strong>TTL:</strong> <code>db.put(..., ttl_s=N)</code>, <code>db.expire()</code>, <code>db.sweep()</code>. Lazy expiry on read; <code>AS OF</code> reads skip expiry checks. Redis <code>EXPIRE</code> now functional. <strong>GROUP BY:</strong> <code>FROM t GROUP BY f COUNT|SUM|AVG|MIN|MAX field</code> in NQL. 30 new tests; 89/89 total.</p></div></div>
+
+  <div class="cl-item"><span class="cl-ver">0.4.2</span><div class="cl-body"><h4>Structured benchmark suite</h4><p><code>bench/benchmarks.py</code>: measures GET/PUT/time-travel, indexed vs unindexed query, adapter overhead vs raw NQL, in-memory vs AOF write cost, optional Redis TCP and nedbd HTTP comparisons. Results written to <code>bench/RESULTS.md</code>. README perf table updated with real measured numbers.</p></div></div>
 
   <div class="cl-item"><span class="cl-ver">0.4.0</span><div class="cl-body"><h4>SQL adapter, Redis compatibility, auto-indexing</h4><p>Three new pure-Python adapters, zero external dependencies. <strong>SQL:</strong> <code>sql_exec(db, sql)</code> translates SELECT/INSERT/UPDATE/DELETE to NQL and NEDB primitives — MariaDB users can write what they know and immediately get time-travel and hash-chain integrity. <strong>Redis:</strong> <code>RedisCompat(db).execute(cmd, *args)</code> maps SET/GET/HSET/HGETALL/SADD/SMEMBERS/LPUSH/LRANGE and 30+ more commands to NEDB. EXPIRE/TTL/SUBSCRIBE/MULTI return <code>RedisUnsupportedError</code> with a roadmap note. <strong>Auto-indexing:</strong> <code>AutoIndexDB(db, threshold=5)</code> tallies query field usage and creates indexes automatically. 48 new tests; 59/59 total.</p></div></div>
 

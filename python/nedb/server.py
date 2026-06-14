@@ -62,6 +62,11 @@ class Manager:
         self.root = root
         os.makedirs(root, exist_ok=True)
         self._open: Dict[str, NEDB] = {}
+        # Resolve TMK once at startup — applies to all databases opened by this daemon.
+        from .crypto import resolve_tmk
+        self._tmk = resolve_tmk()  # reads NEDB_TMK / NEDB_TMK_FILE env; None if unset
+        if self._tmk is not None:
+            print("  encryption: AES-256-GCM enabled (NEDB_TMK configured)")
 
     def _path(self, name: str) -> str:
         return os.path.join(self.root, name)
@@ -81,7 +86,8 @@ class Manager:
         if name not in self._open:
             snap_path = os.path.join(self._path(name), "snapshot.json")
             had_snap = os.path.exists(snap_path)
-            db = NEDB(self._path(name))
+            # Pass the manager-level TMK so every database is encrypted consistently.
+            db = NEDB(self._path(name), tmk=self._tmk)
             if had_snap:
                 print(f"  [{name}] loaded from snapshot (seq={db.seq})")
             self._open[name] = db
@@ -234,7 +240,8 @@ def make_handler(manager: Manager, token: Optional[str]):
 
                 if method == "GET" and (not parts or parts == ["health"]):
                     self._send(200, {"ok": True, "service": "nedbd", "version": __version__,
-                                     "databases": manager.names()})
+                                     "databases": manager.names(),
+                                     "encrypted": manager._tmk is not None})
                     return
 
                 # everything under /v1 requires auth (if a token is configured)
@@ -330,6 +337,7 @@ def make_handler(manager: Manager, token: Optional[str]):
         def _detail(self, name: str) -> dict:
             db = manager.require(name)
             counts = Manager.collection_counts(db)
+            snap_path = os.path.join(manager._path(name), "snapshot.json")
             return {
                 "name": name,
                 "seq": db.seq,
@@ -338,6 +346,8 @@ def make_handler(manager: Manager, token: Optional[str]):
                 "collections": counts,
                 "indexes": [list(t) for t in db.indexes.config],
                 "integrity": {"ok": db.verify()},
+                "encrypted": db._dek is not None,
+                "has_snapshot": os.path.exists(snap_path),
             }
 
     return Handler
