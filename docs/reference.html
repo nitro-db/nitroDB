@@ -242,6 +242,7 @@ pre{
       <a href="#ttl">TTL / Expiry</a>
       <a href="#groupby">GROUP BY Aggregations</a>
       <a href="#encryption">Encryption at Rest</a>
+      <a href="#resp2">RESP2 Wire Protocol</a>
     </div>
     <div class="sb-group">
       <div class="sb-group-label">Release</div>
@@ -1264,9 +1265,62 @@ db.close()
     <p><strong>The hash chain is unaffected.</strong> <code>verify()</code>, <code>AS OF</code>, and Merkle proofs operate on decrypted log entries — encryption is a transparent layer below the log. The chain from genesis through every checkpoint op to the current head remains continuously verifiable.</p>
   </div>
 
-  <div class="warn">
-    <p><strong>Requires:</strong> <code>pip install cryptography</code>. If the package is missing, a clear <code>ImportError</code> is raised when encryption is attempted. Unencrypted databases are unaffected.</p>
+  <div class="note">
+    <p><strong>bundled since v0.5.5:</strong> <code>cryptography</code> is now a required dependency — it ships with every <code>pip install nedb-engine</code>. No separate install needed.</p>
   </div>
+</section>
+
+<!-- ═══════════════════ RESP2 ═══════════════════ -->
+<section class="section" id="resp2">
+  <div class="section-tag">v0.6.0</div>
+  <h2>RESP2 Wire Protocol</h2>
+  <p class="section-lead">nedbd now speaks the Redis Serialization Protocol (RESP2). redis-cli, redis-benchmark, and every Redis client library in every language connects to nedbd natively — no Redis installation required.</p>
+
+  <h3>Enable RESP2</h3>
+  <div class="code-wrap">
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="cc"># env var: NEDBD_RESP2_PORT (0 = disabled, default)</span>
+NEDBD_RESP2_PORT=<span class="cn">6379</span> nedbd
+
+<span class="cc"># Boot log:</span>
+<span class="cc">#   nedbd 0.6.0 — http://127.0.0.1:7070  data=./nedb-data  auth=off</span>
+<span class="cc">#   resp2  — redis://  127.0.0.1:6379  (RESP2 wire protocol)</span></pre>
+  </div>
+
+  <h3>Connect with redis-cli</h3>
+  <div class="code-wrap">
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre>redis-cli -p <span class="cn">6379</span> PING                              <span class="cc"># PONG</span>
+redis-cli -p <span class="cn">6379</span> SELECT salonbooking             <span class="cc"># OK — open that database</span>
+redis-cli -p <span class="cn">6379</span> SET key <span class="cs">"hello"</span>                  <span class="cc"># OK</span>
+redis-cli -p <span class="cn">6379</span> HSET <span class="cs">"user:1"</span> name Ada age <span class="cn">31</span>   <span class="cc"># :2</span>
+redis-cli -p <span class="cn">6379</span> SADD tags python rust            <span class="cc"># :2</span>
+redis-cli -p <span class="cn">6379</span> SMEMBERS tags                     <span class="cc"># {"python", "rust"}</span></pre>
+  </div>
+
+  <h3>NQL pass-through via EVAL</h3>
+  <div class="code-wrap">
+    <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+<pre><span class="cc"># EVAL runs any NQL query; rows are returned as JSON strings</span>
+redis-cli -p <span class="cn">6379</span> EVAL <span class="cs">"FROM users WHERE status = \"active\" LIMIT 5"</span> <span class="cn">0</span>
+<span class="cc"># 1) "{\"_id\":\"u1\",\"name\":\"Ada\",\"status\":\"active\"}"</span>
+<span class="cc"># 2) "{\"_id\":\"u2\",\"name\":\"Bo\",\"status\":\"active\"}"</span></pre>
+  </div>
+
+  <h3>SELECT maps to NEDB database names</h3>
+  <p><code>SELECT &lt;name&gt;</code> opens the named NEDB database (creates it if it doesn't exist). This replaces Redis's integer 0-15 DBs with NEDB's named databases — use the database name you deployed in nedbd.</p>
+
+  <h3>Command coverage</h3>
+  <table class="ptbl">
+    <tr><th>Group</th><th>Commands</th></tr>
+    <tr><td>Strings</td><td><code>SET GET DEL EXISTS INCR INCRBY DECR DECRBY MSET MGET SETNX GETDEL APPEND STRLEN TYPE RENAME KEYS DBSIZE FLUSHDB</code></td></tr>
+    <tr><td>Hashes</td><td><code>HSET HMSET HSETNX HGET HMGET HGETALL HDEL HEXISTS HKEYS HVALS HLEN HINCRBY</code></td></tr>
+    <tr><td>Sets</td><td><code>SADD SMEMBERS SISMEMBER SREM SCARD SUNION SINTER SDIFF</code></td></tr>
+    <tr><td>Lists</td><td><code>LPUSH RPUSH LRANGE LLEN LINDEX LSET LPOP RPOP</code></td></tr>
+    <tr><td>Server</td><td><code>PING SELECT COMMAND QUIT DBSIZE KEYS TYPE FLUSHDB</code></td></tr>
+    <tr><td>NQL</td><td><code>EVAL "&lt;nql&gt;" 0</code> — run any NQL query</td></tr>
+    <tr><td>Unsupported (roadmap)</td><td><code>EXPIRE TTL PTTL SUBSCRIBE PUBLISH MULTI EXEC</code> — clear <code>-ERR</code> with roadmap note</td></tr>
+  </table>
 </section>
 
 <div class="divider"></div>
@@ -1275,6 +1329,8 @@ db.close()
 <section class="section" id="changelog">
   <div class="section-tag">Release History</div>
   <h2>Changelog</h2>
+
+  <div class="cl-item"><span class="cl-ver">0.6.0</span><div class="cl-body"><h4>RESP2 wire protocol — nedbd is a drop-in Redis replacement</h4><p>Enable with <code>NEDBD_RESP2_PORT=6379 nedbd</code>. redis-cli, redis-benchmark, and every Redis client library connects natively. <code>SELECT &lt;name&gt;</code> opens a named NEDB database. <code>EVAL "&lt;nql&gt;" 0</code> runs any NQL query. All major command groups supported (strings, hashes, sets, lists); EXPIRE/TTL/SUBSCRIBE/MULTI return clear <code>-ERR</code> with roadmap note. Also: auto backfill-encrypt existing plaintext AOF on first encrypted open (v0.5.6), eager database open at startup so backfill shows in boot log (v0.5.7), <code>cryptography</code> bundled as required dep (v0.5.5).</p></div></div>
 
   <div class="cl-item"><span class="cl-ver">0.5.3</span><div class="cl-body"><h4>AES-256-GCM encryption at rest — double envelope TMK</h4><p>Toggle-able at-rest encryption for the AOF, snapshots, and BlobStore chunks. Double-envelope: a random per-database DEK is wrapped by an external TMK (programmatic, <code>NEDB_TMK</code> env, or key file). The GCM tag detects any tampering on read. Key rotation via <code>db.rewrap_key()</code> re-wraps the DEK without touching data. The hash chain, <code>verify()</code>, and <code>AS OF</code> work unchanged through encryption. Requires <code>pip install cryptography</code>. 38 new tests; 127/127 total.</p></div></div>
 
