@@ -23,6 +23,9 @@ from .snapshot import save_snapshot, load_snapshot
 from .crypto import resolve_tmk, rewrap_dek
 from .sql import sql_exec, sql_to_nql, SQLError, SQLUnsupportedError
 from .redis_compat import RedisCompat, RedisError, RedisUnsupportedError
+from .mongo import (
+    MongoCompat, MongoClient, MongoError, MongoUnsupportedError, ObjectId,
+)
 from .autoindex import AutoIndexDB
 
 try:  # compiled Rust core, present in platform wheels (PyO3 via maturin)
@@ -37,7 +40,8 @@ __all__ = [
     "save_snapshot", "load_snapshot",
     "sql_exec", "sql_to_nql", "SQLError", "SQLUnsupportedError",
     "RedisCompat", "RedisError", "RedisUnsupportedError",
+    "MongoCompat", "MongoClient", "MongoError", "MongoUnsupportedError", "ObjectId",
     "AutoIndexDB",
     "_native", "__has_native__",
 ]
-__version__ = "0.7.4"
+__version__ = "0.7.5"
