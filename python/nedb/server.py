@@ -79,7 +79,12 @@ class Manager:
     def open(self, name: str) -> NEDB:
         self._valid(name)
         if name not in self._open:
-            self._open[name] = NEDB(self._path(name))
+            snap_path = os.path.join(self._path(name), "snapshot.json")
+            had_snap = os.path.exists(snap_path)
+            db = NEDB(self._path(name))
+            if had_snap:
+                print(f"  [{name}] loaded from snapshot (seq={db.seq})")
+            self._open[name] = db
         return self._open[name]
 
     def require(self, name: str) -> NEDB:
@@ -145,7 +150,21 @@ class Manager:
             "collections": counts,
         }
 
+    def checkpoint_all(self) -> Dict[str, str]:
+        """Checkpoint every open database — call before shutdown."""
+        heads: Dict[str, str] = {}
+        for name, db in self._open.items():
+            try:
+                head = db.checkpoint()
+                heads[name] = head
+                print(f"  [{name}] checkpoint saved  head={head[:12]}…  seq={db.seq}")
+            except Exception as e:  # noqa: BLE001
+                print(f"  [{name}] checkpoint failed: {e}")
+        return heads
+
     def close_all(self) -> None:
+        # Checkpoint each database before closing so the next startup is O(delta).
+        self.checkpoint_all()
         for db in self._open.values():
             db.close()
         self._open.clear()
@@ -285,6 +304,10 @@ def make_handler(manager: Manager, token: Optional[str]):
                     if method == "GET" and action == "verify":
                         self._send(200, {"ok": db.verify(), "seq": db.seq, "head": db.head})
                         return
+                    if method == "POST" and action == "checkpoint":
+                        head = db.checkpoint()
+                        self._send(200, {"ok": True, "head": head, "seq": db.seq})
+                        return
                     if method == "GET" and action == "log":
                         limit = int(query.get("limit", ["50"])[0])
                         ops = [o.to_dict() for o in db.log.ops[-limit:]][::-1]
@@ -326,18 +349,33 @@ def main() -> None:
     data = os.environ.get("NEDBD_DATA", "./nedb-data")
     token = os.environ.get("NEDBD_TOKEN") or None
 
+    import signal
+    import threading
+
     manager = Manager(data)
     httpd = ThreadingHTTPServer((host, port), make_handler(manager, token))
     auth = "on" if token else "off"
     print(f"nedbd {__version__} — http://{host}:{port}  data={os.path.abspath(data)}  auth={auth}")
     print(f"  {len(manager.names())} database(s): {', '.join(manager.names()) or '(none)'}")
+
+    def _shutdown(signum, _frame):
+        """SIGTERM / SIGINT — checkpoint all databases then exit cleanly.
+        httpd.shutdown() MUST be called from a different thread than serve_forever()
+        or it deadlocks; we spawn a daemon thread to do it."""
+        sig_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+        n = len(manager._open)
+        print(f"\nnedbd {sig_name} — checkpointing {n} database(s)…")
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT,  _shutdown)
+
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nshutting down…")
+        httpd.serve_forever()   # blocks; unblocked by _shutdown → httpd.shutdown()
     finally:
         httpd.server_close()
-        manager.close_all()
+        manager.close_all()   # checkpoint → fsync → close every open database
+        print("nedbd stopped cleanly.")
 
 
 if __name__ == "__main__":
