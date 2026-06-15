@@ -7,9 +7,9 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
-license = "Apache-2.0"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/Eth-Interchained/nedb"
 authors = ["Eth-Interchained"]
 

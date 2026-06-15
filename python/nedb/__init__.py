@@ -45,4 +45,4 @@ __all__ = [
     "AutoIndexDB", "Sequencer",
     "_native", "__has_native__",
 ]
-__version__ = "1.0.4"
+__version__ = "1.0.5"

@@ -1,14 +1,15 @@
 {
   "name": "nedb-engine",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "NEDB — hash-chained, time-traveling, bi-temporal embedded database with Rust native core. SQL, Redis, MongoDB adapters. Causal Write Provenance. RESP2 wire protocol.",
   "main": "index.js",
   "types": "index.d.ts",
   "files": ["index.js", "index.d.ts", "*.node", "README.md", "LICENSE"],
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/aiassistsecure/nedb#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Eth-Interchained/nedb.git"
+    "url": "git+https://github.com/aiassistsecure/nedb.git"
   },
   "keywords": [
     "database", "embedded", "mvcc", "time-travel", "bi-temporal", "causal-provenance",
