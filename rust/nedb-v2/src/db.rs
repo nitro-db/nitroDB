@@ -1,5 +1,6 @@
 //! Main DAG database — coordinates ObjectStore, IdIndex, SortedIndexes, GraphStore.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::Result;
@@ -10,6 +11,15 @@ use crate::store::{Dek, Node, ObjectStore};
 use crate::index::{IdIndex, OrderedValue, SortedIndexes};
 use crate::graph::GraphStore;
 use crate::migrate;
+
+/// MANIFEST: cached {seq, head} written atomically after every write.
+/// On startup, if MANIFEST exists and no sorted indexes need rebuilding,
+/// startup is O(1) — just read this one file instead of scanning all objects.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Manifest {
+    seq:  u64,
+    head: String,
+}
 
 pub struct Db {
     pub objects:        ObjectStore,
@@ -54,22 +64,75 @@ impl Db {
             dek.as_ref(),
         )?;
 
-        // Rebuild sorted indexes + find max seq from existing objects
-        db.rebuild_from_objects()?;
+        // Fast startup: load seq+head from MANIFEST if no sorted indexes need rebuilding.
+        // Falls back to full object scan only when necessary (first open, or post-migration).
+        db.startup_rebuild()?;
 
         Ok(db)
     }
 
-    /// Rebuild in-memory sorted indexes, max seq, and Merkle head from the object store.
-    /// This is O(n_objects) but fully parallel via Rayon. Runs once on cold start.
-    fn rebuild_from_objects(&mut self) -> Result<()> {
+    /// Smart startup: use MANIFEST for instant O(1) start, or full scan with progress bar.
+    fn startup_rebuild(&mut self) -> Result<()> {
+        let manifest_path = self.root.join("MANIFEST");
+        let needs_index_rebuild = !self.sorted_indexes.is_empty();
+
+        // Fast path: MANIFEST exists and no sorted indexes to rebuild
+        if manifest_path.exists() && !needs_index_rebuild {
+            match fs::read_to_string(&manifest_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Manifest>(&s).ok())
+            {
+                Some(m) => {
+                    self.seq.store(m.seq + 1, Ordering::SeqCst);
+                    *self.head.write() = m.head;
+                    let n_objects: usize = self.objects.all_hashes().count();
+                    println!("  [nedbd] fast start — MANIFEST loaded (seq={} objects={})", m.seq, n_objects);
+                    return Ok(());
+                }
+                None => {
+                    eprintln!("  [nedbd] MANIFEST corrupt, falling back to full scan");
+                }
+            }
+        }
+
+        // Slow path: full object scan with progress indicator
+        self.rebuild_from_objects_with_progress()
+    }
+
+    /// Full O(n) rebuild — runs in parallel via Rayon, prints progress every 10k objects.
+    fn rebuild_from_objects_with_progress(&mut self) -> Result<()> {
         use rayon::prelude::*;
         use blake2::{Blake2b512, Digest};
 
         let hashes: Vec<String> = self.objects.all_hashes().collect();
+        let total = hashes.len();
+
+        if total == 0 {
+            return Ok(());
+        }
+
+        println!("  [nedbd] cold start — scanning {} objects (this happens once)...", total);
+        let t0 = std::time::Instant::now();
+
+        // Parallel read + deserialize
+        let step = (total / 10).max(1000);
         let nodes: Vec<Node> = hashes.par_iter()
-            .filter_map(|h| self.objects.read(h).ok())
+            .enumerate()
+            .filter_map(|(i, h)| {
+                if i > 0 && i % step == 0 {
+                    let pct = i * 100 / total;
+                    let elapsed = t0.elapsed().as_secs_f32();
+                    let rate = i as f32 / elapsed;
+                    let eta = (total - i) as f32 / rate;
+                    eprint!("\r  [nedbd]   {:>3}%  {:>8} / {}  ({:>7,.0}/s  eta {:.0}s)   ",
+                        pct, i, total, rate, eta);
+                }
+                self.objects.read(h).ok()
+            })
             .collect();
+
+        eprintln!("\r  [nedbd]   100%  {} / {}  ({:.1}s total)                    ",
+            total, total, t0.elapsed().as_secs_f32());
 
         let max_seq = nodes.iter().map(|n| n.seq).max().unwrap_or(0);
         self.seq.store(max_seq + 1, Ordering::SeqCst);
@@ -84,8 +147,7 @@ impl Db {
             }
         }
 
-        // Bootstrap the running Merkle head: sort all hashes (deterministic),
-        // then chain them with BLAKE2b. This is done ONCE on startup.
+        // Bootstrap Merkle head from sorted hashes
         let mut sorted_hashes = hashes;
         sorted_hashes.sort();
         let mut h = Blake2b512::new();
@@ -93,7 +155,12 @@ impl Db {
         for hash in &sorted_hashes {
             h.update(hash.as_bytes());
         }
-        *self.head.write() = hex::encode(&h.finalize()[..32]);
+        let new_head = hex::encode(&h.finalize()[..32]);
+        *self.head.write() = new_head.clone();
+
+        // Write MANIFEST so next startup is instant
+        self.flush_manifest();
+        println!("  [nedbd] rebuild complete — MANIFEST written (seq={} objects={})", max_seq, total);
 
         Ok(())
     }
@@ -172,6 +239,21 @@ impl Db {
         h.update(seq.to_le_bytes());
         h.update(new_hash.as_bytes());
         *self.head.write() = hex::encode(&h.finalize()[..32]);
+        // Persist MANIFEST so next startup is instant
+        self.flush_manifest();
+    }
+
+    /// Atomically persist current seq+head to MANIFEST.
+    fn flush_manifest(&self) {
+        let seq  = self.seq.load(Ordering::SeqCst);
+        let head = self.head.read().clone();
+        let m = Manifest { seq, head };
+        if let Ok(json) = serde_json::to_string(&m) {
+            let path = self.root.join("MANIFEST");
+            let tmp  = self.root.join("MANIFEST.tmp");
+            let _ = fs::write(&tmp, &json);
+            let _ = fs::rename(&tmp, &path);
+        }
     }
 
     /// Return the current Merkle head string. O(1) — read from cache.
