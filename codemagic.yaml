@@ -60,12 +60,15 @@ workflows:
           chmod +x ../../python/nedb/nedbd-v2
           echo "Binary: $(ls -lh ../../python/nedb/nedbd-v2)"
 
-      - name: Stage Python source for maturin
+      - name: Stage Python source + verify binary
         script: |
           rm -rf rust/crates/nedb-py/python
           mkdir -p rust/crates/nedb-py/python
           cp -r python/nedb rust/crates/nedb-py/python/nedb
           find rust/crates/nedb-py/python/nedb -name "nedbd-v2*" -exec chmod +x {} \;
+          echo "Staged $(find rust/crates/nedb-py/python/nedb -name '*.py' | wc -l) .py files"
+          # Fail loudly if binary is missing — maturin include= needs it present
+          ls -lh rust/crates/nedb-py/python/nedb/nedbd-v2 || { echo "ERROR: nedbd-v2 missing!"; exit 1; }
           echo "Staged $(find rust/crates/nedb-py/python/nedb -name '*.py' | wc -l) py files"
 
       - name: Build wheel (maturin)
@@ -145,12 +148,15 @@ workflows:
           chmod +x ../../python/nedb/nedbd-v2
           echo "Binary: $(ls -lh ../../python/nedb/nedbd-v2)"
 
-      - name: Stage Python source for maturin
+      - name: Stage Python source + verify binary
         script: |
           rm -rf rust/crates/nedb-py/python
           mkdir -p rust/crates/nedb-py/python
           cp -r python/nedb rust/crates/nedb-py/python/nedb
           find rust/crates/nedb-py/python/nedb -name "nedbd-v2*" -exec chmod +x {} \;
+          echo "Staged $(find rust/crates/nedb-py/python/nedb -name '*.py' | wc -l) .py files"
+          # Fail loudly if binary is missing — maturin include= needs it present
+          ls -lh rust/crates/nedb-py/python/nedb/nedbd-v2 || { echo "ERROR: nedbd-v2 missing!"; exit 1; }
 
       - name: Build wheel (maturin)
         script: |

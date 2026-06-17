@@ -81,7 +81,13 @@ jobs:
           cp -r python/nedb rust/crates/nedb-py/python/nedb
           find rust/crates/nedb-py/python/nedb -name "nedbd-v2*" -exec chmod +x {} \; || true
           echo "Staged $(find rust/crates/nedb-py/python/nedb -name '*.py' | wc -l) .py files"
-          ls -lh rust/crates/nedb-py/python/nedb/nedbd-v2* 2>/dev/null || echo "(no nedbd-v2 staged)"
+          # Verify binary made it — fail loudly if missing (maturin include= requires it)
+          if ls rust/crates/nedb-py/python/nedb/nedbd-v2* 2>/dev/null; then
+            echo "nedbd-v2 binary confirmed in staging area"
+          else
+            echo "ERROR: nedbd-v2 binary missing from staging area — wheel would lack the binary"
+            exit 1
+          fi
       - name: Build wheel (maturin)
         uses: PyO3/maturin-action@v1
         with:
