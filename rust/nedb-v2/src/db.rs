@@ -137,6 +137,12 @@ impl Db {
         if self_arc.startup_ready.load(Ordering::SeqCst) {
             return; // warm start — already ready
         }
+        // Fast path: if the database is empty (new or just created), skip the
+        // background thread entirely. No objects to scan = instant startup.
+        if self_arc.objects.all_hashes().next().is_none() {
+            self_arc.startup_ready.store(true, Ordering::SeqCst);
+            return;
+        }
         println!("  [nedbd] cold start — background scan starting, server accepting reads now");
         std::thread::spawn(move || {
             let db = self_arc;
