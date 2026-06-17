@@ -90,13 +90,23 @@ fn id_shard(id: &str) -> String {
 /// Per-document ID index — atomic file-per-doc, sharded across 256 subdirs.
 pub struct IdIndex {
     root: PathBuf,
+    /// In-memory store: (coll, id) → hash. None = disk-backed (normal mode).
+    mem:  Option<Arc<dashmap::DashMap<(String, String), String>>>,
 }
 
 impl IdIndex {
     pub fn new(db_root: &Path) -> Result<Self> {
         let root = db_root.join("indexes");
         fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        Ok(Self { root, mem: None })
+    }
+
+    /// Create a pure in-memory id index — no disk I/O.
+    pub fn in_memory() -> Self {
+        Self {
+            root: PathBuf::from(":memory:"),
+            mem:  Some(Arc::new(dashmap::DashMap::new())),
+        }
     }
 
     fn path(&self, coll: &str, id: &str) -> PathBuf {
@@ -110,13 +120,20 @@ impl IdIndex {
 
     /// Get the current object hash for a document.
     pub fn get(&self, coll: &str, id: &str) -> Option<String> {
+        if let Some(ref mem) = self.mem {
+            return mem.get(&(coll.to_string(), id.to_string())).map(|v| v.clone());
+        }
         let content = fs::read_to_string(self.path(coll, id)).ok()?;
         let h = content.trim().to_string();
         if h.is_empty() { None } else { Some(h) }
     }
 
-    /// Set the current object hash for a document (atomic).
+    /// Set the current object hash for a document (atomic on disk, instant in memory).
     pub fn set(&self, coll: &str, id: &str, hash: &str) -> Result<()> {
+        if let Some(ref mem) = self.mem {
+            mem.insert((coll.to_string(), id.to_string()), hash.to_string());
+            return Ok(());
+        }
         let path = self.path(coll, id);
         fs::create_dir_all(path.parent().unwrap())?;
         let tmp = path.with_extension("tmp");
@@ -125,8 +142,14 @@ impl IdIndex {
         Ok(())
     }
 
-    /// List all doc IDs in a collection (walks shard subdirectories).
+    /// List all doc IDs in a collection (memory map or shard subdirectories).
     pub fn list_ids(&self, coll: &str) -> Vec<String> {
+        if let Some(ref mem) = self.mem {
+            return mem.iter()
+                .filter(|e| e.key().0 == coll)
+                .map(|e| e.key().1.clone())
+                .collect();
+        }
         let id_root = self.root.join(coll).join("id");
         // Each entry in id_root is a 2-char hex shard dir
         fs::read_dir(&id_root)
@@ -151,6 +174,10 @@ impl IdIndex {
 
     /// Remove the id index entry for a document (tombstone / delete).
     pub fn remove(&self, coll: &str, id: &str) -> Result<()> {
+        if let Some(ref mem) = self.mem {
+            mem.remove(&(coll.to_string(), id.to_string()));
+            return Ok(());
+        }
         let path = self.path(coll, id);
         if path.exists() {
             fs::remove_file(&path).context("remove id index entry")?;
@@ -160,6 +187,14 @@ impl IdIndex {
 
     /// List all known collections.
     pub fn collections(&self) -> Vec<String> {
+        if let Some(ref mem) = self.mem {
+            let mut colls: Vec<String> = mem.iter()
+                .map(|e| e.key().0.clone())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter().collect();
+            colls.sort();
+            return colls;
+        }
         fs::read_dir(&self.root)
             .into_iter()
             .flatten()

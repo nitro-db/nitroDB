@@ -43,6 +43,23 @@ pub struct Db {
 }
 
 impl Db {
+    /// Create a pure in-memory database — no disk I/O, no migration, instant startup.
+    /// Perfect for tests, hot-cache layers, and ephemeral sessions.
+    /// All data is lost when the Db is dropped.
+    pub fn in_memory() -> Self {
+        Self {
+            objects:        ObjectStore::in_memory(),
+            id_index:       IdIndex::in_memory(),
+            sorted_indexes: SortedIndexes::new(),
+            graph:          GraphStore::in_memory(),
+            root:           std::path::PathBuf::from(":memory:"),
+            seq:            AtomicU64::new(0),
+            head:           RwLock::new(String::new()),
+            startup_ready:  Arc::new(AtomicBool::new(true)),  // always ready
+            manifest_dirty: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Open (or create) a database. Runs v1→v2 migration automatically if log.aof is present.
     pub fn open(db_root: &Path, dek: Option<Dek>) -> Result<Self> {
         std::fs::create_dir_all(db_root)?;
@@ -271,8 +288,9 @@ impl Db {
         self.manifest_dirty.store(true, Ordering::Release);
     }
 
-    /// Flush MANIFEST to disk if dirty. Called by background ticker and on shutdown.
+    /// Flush MANIFEST to disk if dirty. No-op for in-memory databases.
     pub fn flush_manifest_if_dirty(&self) {
+        if self.root == std::path::PathBuf::from(":memory:") { return; }
         if self.manifest_dirty.compare_exchange(
             true, false, Ordering::AcqRel, Ordering::Relaxed
         ).is_ok() {
@@ -280,8 +298,9 @@ impl Db {
         }
     }
 
-    /// Atomically persist current seq+head to MANIFEST.
+    /// Atomically persist current seq+head to MANIFEST. No-op for in-memory databases.
     pub fn flush_manifest(&self) {
+        if self.root == std::path::PathBuf::from(":memory:") { return; }
         let seq  = self.seq.load(Ordering::SeqCst);
         let head = self.head.read().clone();
         let m = Manifest { seq, head };
