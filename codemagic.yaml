@@ -9,7 +9,7 @@
 #
 # Secrets required (set in Codemagic App Settings → Environment variables):
 #   PYPI_API_TOKEN  — PyPI token with upload access to nedb-engine
-#   NPM_TOKEN       — npm token (optional, for napi npm publish)
+#   NPM_TOKEN       — npm token with publish access to nedb-engine
 
 workflows:
 
@@ -73,8 +73,24 @@ workflows:
           TWINE_PASSWORD=$PYPI_API_TOKEN \
           twine upload --skip-existing --verbose dist/*.whl
 
+      - name: Build napi addon (arm64)
+        script: |
+          source "$HOME/.cargo/env"
+          npm install
+          npx napi build --platform --release --target $RUST_TARGET \
+            --cargo-cwd rust/crates/nedb-node
+          echo "napi artifacts: $(ls *.node index.js index.d.ts 2>/dev/null)"
+
+      - name: Publish napi to npm
+        script: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "Publishing nedb-engine@$VERSION (macos-arm64)"
+          npm publish --access public || echo "Already published — skipping"
+
     artifacts:
       - dist/*.whl
+      - "*.node"
 
   # ── Intel Mac wheel (x86_64) ──────────────────────────────────────────
   macos-intel-wheel:
@@ -135,5 +151,21 @@ workflows:
           TWINE_PASSWORD=$PYPI_API_TOKEN \
           twine upload --skip-existing --verbose dist/*.whl
 
+      - name: Build napi addon (x86_64)
+        script: |
+          source "$HOME/.cargo/env"
+          npm install
+          npx napi build --platform --release --target $RUST_TARGET \
+            --cargo-cwd rust/crates/nedb-node
+          echo "napi artifacts: $(ls *.node index.js index.d.ts 2>/dev/null)"
+
+      - name: Publish napi to npm
+        script: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "Publishing nedb-engine@$VERSION (macos-x86_64)"
+          npm publish --access public || echo "Already published — skipping"
+
     artifacts:
       - dist/*.whl
+      - "*.node"
