@@ -399,28 +399,66 @@ async fn batch_operations(
         return err(StatusCode::SERVICE_UNAVAILABLE,
             "database startup in progress — reads available, writes retry in a moment");
     }
-    let mut results = vec![];
-    for op in body.ops {
-        let op_type = op.op.to_lowercase();
-        let coll = op.coll.unwrap_or_default();
-        let id   = op.id.unwrap_or_default();
-        let result = match op_type.as_str() {
+
+    // Split ops into puts (parallelisable) and deletes (sequential)
+    // Puts go through put_batch for parallel object + index writes.
+    // Deletes remain sequential (tombstone ordering matters).
+    let mut put_ops = vec![];
+    let mut del_ops: Vec<(String, String)> = vec![];
+    let mut op_order: Vec<(&str, usize)> = vec![];  // ("put"|"del", index into respective vec)
+
+    for op in &body.ops {
+        let t = op.op.to_lowercase();
+        match t.as_str() {
             "put" => {
-                let doc = op.doc.unwrap_or(json!({}));
-                match db.put(&coll, &id, doc, op.caused_by.unwrap_or_default(), None, None) {
-                    Ok(node) => json!({"op": "put", "id": id, "seq": node.seq, "hash": node.hash}),
-                    Err(e)   => json!({"op": "put", "id": id, "error": e.to_string()}),
-                }
+                op_order.push(("put", put_ops.len()));
+                put_ops.push((
+                    op.coll.clone().unwrap_or_default(),
+                    op.id.clone().unwrap_or_default(),
+                    op.doc.clone().unwrap_or(json!({})),
+                    op.caused_by.clone().unwrap_or_default(),
+                    None::<String>,
+                    None::<String>,
+                ));
             }
             "del" | "delete" => {
-                match db.delete(&coll, &id) {
-                    Ok(existed) => json!({"op": "del", "id": id, "ok": existed}),
-                    Err(e)      => json!({"op": "del", "id": id, "error": e.to_string()}),
-                }
+                op_order.push(("del", del_ops.len()));
+                del_ops.push((
+                    op.coll.clone().unwrap_or_default(),
+                    op.id.clone().unwrap_or_default(),
+                ));
             }
-            _ => json!({"op": op_type, "error": "unknown op"}),
+            _ => { op_order.push(("unknown", 0)); }
+        }
+    }
+
+    // Execute all puts in parallel via put_batch
+    let put_results = if put_ops.is_empty() {
+        vec![]
+    } else {
+        match db.put_batch(put_ops) {
+            Ok(nodes) => nodes.into_iter().map(|n| json!({"op":"put","id":n.id,"seq":n.seq,"hash":n.hash})).collect(),
+            Err(e)    => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        }
+    };
+
+    // Execute deletes sequentially
+    let del_results: Vec<serde_json::Value> = del_ops.iter().map(|(coll, id)| {
+        match db.delete(coll, id) {
+            Ok(existed) => json!({"op":"del","id":id,"ok":existed}),
+            Err(e)      => json!({"op":"del","id":id,"error":e.to_string()}),
+        }
+    }).collect();
+
+    // Reconstruct results in original op order
+    let mut results = vec![];
+    for (kind, idx) in &op_order {
+        let r = match *kind {
+            "put"     => put_results.get(*idx).cloned().unwrap_or(json!({"op":"put","error":"missing"})),
+            "del"     => del_results.get(*idx).cloned().unwrap_or(json!({"op":"del","error":"missing"})),
+            _         => json!({"op": kind, "error": "unknown op"}),
         };
-        results.push(result);
+        results.push(r);
     }
     let (seq, head) = db_seq_head(&db);
     ok(json!({"results": results, "count": results.len(), "seq": seq, "head": head}))
