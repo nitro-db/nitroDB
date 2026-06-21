@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nedb-engine"
-version = "2.2.10"
+version = "2.2.11"
 description = "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable) with durable AOF persistence and a server daemon (nedbd)."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "cryptography>=41",   # AES-256-GCM at-rest encryption; pre-built wheels on all platforms
+    "cryptography>=41,<44",  # AES-256-GCM encryption; <44 avoids cffi>=2.0 build failures on Windows/MinGW
 ]
 
 [project.scripts]
