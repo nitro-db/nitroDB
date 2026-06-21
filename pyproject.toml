@@ -10,7 +10,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nedb-engine"
-version = "2.2.11"
+version = "2.2.12"
 description = "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable) with durable AOF persistence and a server daemon (nedbd)."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -26,9 +26,12 @@ classifiers = [
     "Topic :: Database :: Database Engines/Servers",
 ]
 
-dependencies = [
-    "cryptography>=41,<44",  # AES-256-GCM encryption; <44 avoids cffi>=2.0 build failures on Windows/MinGW
-]
+dependencies = []  # no required binary deps — installs on any platform without a C compiler
+
+[project.optional-dependencies]
+# AES-256-GCM at-rest encryption. Only needed if you set NEDB_TMK / use tmk= in NEDB(path, tmk=...).
+# Install with:  pip install nedb-engine[encryption]
+encryption = ["cryptography>=41"]
 
 [project.scripts]
 nedbd = "nedb.server:main"
