@@ -3,8 +3,8 @@
 **NEDB v2 — content-addressed DAG storage engine with NQL and HTTP server**
 
 [![crates.io](https://img.shields.io/crates/v/nedb-engine?color=f97316)](https://crates.io/crates/nedb-engine)
-[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue)](https://github.com/Eth-Interchained/nedb/blob/master/LICENSE)
-[![GitHub](https://img.shields.io/badge/github-Eth--Interchained%2Fnedb-8da0cb)](https://github.com/Eth-Interchained/nedb)
+[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue)](https://github.com/aiassistsecure/nedb/blob/master/LICENSE)
+[![GitHub](https://img.shields.io/badge/github-aiassistsecure%2Fnedb-8da0cb)](https://github.com/aiassistsecure/nedb)
 
 This crate ships the **`nedbd`** binary — the NEDB v2 DAG HTTP server. Install it, point it at a data directory, and any language can speak to it over HTTP/JSON.
 
@@ -172,7 +172,7 @@ nedbd --doctor
 
 ## License
 
-[BUSL-1.1](https://github.com/Eth-Interchained/nedb/blob/master/LICENSE) — Business Source License. Free for development and evaluation; production use requires a commercial licence from INTERCHAINED, LLC.
+[BUSL-1.1](https://github.com/aiassistsecure/nedb/blob/master/LICENSE) — Business Source License. Free for development and evaluation; production use requires a commercial licence from INTERCHAINED, LLC.
 
 ---
 
