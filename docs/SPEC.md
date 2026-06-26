@@ -1,6 +1,6 @@
 # NEDB — Architecture Specification
 
-Status: v2.4.0 · Rust v2 content-addressed DAG engine shipped (PyPI · npm · crates.io) · v3 segment/pack substrate opt-in (`--dag-v3`)
+Status: v2.4.2 · Rust v2 content-addressed DAG engine shipped (PyPI · npm · crates.io) · v3 segment/pack substrate opt-in (`--dag-v3`, parsed as a real `nedbd-v2` flag as of v2.4.2)
 
 ---
 
