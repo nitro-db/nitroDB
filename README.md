@@ -1,3 +1,11 @@
+# nitrodb
+
+> The fast, lightweight distribution of NEDB: append-only op-log lineage, minimal footprint, built for speed.
+>
+> Built from the shared **NEDB** core (`nedb-engine`). Identical to the engine today; distribution-specific defaults land here in a later release. Engine development happens upstream at Eth-Interchained/nedb.
+
+---
+
 <div align="center">
 
 # NEDB

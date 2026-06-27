@@ -4,6 +4,7 @@ members = [
     "crates/nedb-core",
     "crates/nedb-py",
     "crates/nedb-node",
+    "crates/nitrodb",
     "nedb-v2",
 ]
 
