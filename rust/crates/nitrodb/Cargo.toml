@@ -1,0 +1,10 @@
+[package]
+name = "nitrodb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The fast, lightweight distribution of NEDB: append-only op-log lineage, minimal footprint, built for speed."
+
+[dependencies]
+nedb-engine = { path = "../../nedb-v2", version = "2.4.2" }
