@@ -9,15 +9,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nitrodb"
-version = "2.4.3"
+name = "aof-db"
+version = "2.4.4"
 description = "NEDB — a versioned, self-compressing, time-traveling embedded database (replay-protected, idempotent, relational, searchable) with durable AOF persistence and a server daemon (nedbd)."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Eth-Interchained" }]
 keywords = ["database", "embedded", "mvcc", "time-travel", "versioning",
-            "compression", "dedup", "graph", "search", "redis", "git", "persistence", "server"]
+            "compression", "dedup", "graph", "search", "redis", "git", "persistence", "server",
+            "aof", "aof-db"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
