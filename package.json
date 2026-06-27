@@ -1,6 +1,6 @@
 {
-  "name": "nitrodb",
-  "version": "2.4.3",
+  "name": "aof-db",
+  "version": "2.4.4",
   "description": "NEDB — hash-chained, time-traveling, bi-temporal embedded database with Rust native core. SQL, Redis, MongoDB adapters. Causal Write Provenance. RESP2 wire protocol.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -36,13 +36,15 @@
     "versioning",
     "napi-rs",
     "rust",
-    "nedb"
+    "nedb",
+    "aof",
+    "aof-db"
   ],
   "engines": {
     "node": ">= 16"
   },
   "napi": {
-    "name": "nitrodb",
+    "name": "aof-db",
     "triples": {
       "defaults": true,
       "additional": [
